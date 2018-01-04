@@ -207,33 +207,6 @@ abstract class CommandWithUpgrade extends \WP_CLI_Command {
 		return $site_name;
 	}
 
-
-	protected function active_many( $args, $assoc_args ) {
-
-		$items = $this->get_item_list();
-		if ( !empty( $items_to_update ) ) {
-			$cache_manager = \WP_CLI::get_http_cache_manager();
-			foreach ($items_to_update as $item) {
-				$cache_manager->whitelist_package($item['update_package'], $this->item_type, $item['name'], $item['update_version']);
-			}
-			$upgrader = $this->get_upgrader( $assoc_args );
-			// Ensure the upgrader uses the download offer present in each item
-			$transient_filter = function( $transient ) use ( $items_to_update ) {
-				foreach( $items_to_update as $name => $item_data ) {
-					if ( isset( $transient->response[ $name ] ) ) {
-						$transient->response[ $name ]->new_version = $item_data['update_version'];
-						$transient->response[ $name ]->package = $item_data['update_package'];
-					}
-				}
-				return $transient;
-			};
-			add_filter( 'site_transient_' . $this->upgrade_transient, $transient_filter, 999 );
-			$result = $upgrader->bulk_upgrade( wp_list_pluck( $items_to_update, 'update_id' ) );
-			remove_filter( 'site_transient_' . $this->upgrade_transient, $transient_filter, 999 );
-		}
-
-	}
-
 	private function get_padding( $items ) {
 		$max_len = 0;
 
