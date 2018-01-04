@@ -56,13 +56,14 @@ abstract class CommandWithUpgrade extends \WP_CLI_Command {
 		call_user_func( $this->upgrade_refresh );
 
 		if ( empty( $args ) ) {
-			$this->status_all();
-		} else {
-			$this->status_single( $args );
+			$this->status_all( $assoc_args );
+			return;
 		}
+
+		$this->status_single( $args );
 	}
 
-	private function status_all() {
+	private function status_all( $assoc_args ) {
 		$items = $this->get_all_items();
 
 		$n = count( $items );
@@ -75,11 +76,17 @@ abstract class CommandWithUpgrade extends \WP_CLI_Command {
 
 		$padding = $this->get_padding($items);
 
+		$relation = array();
+		if ( ! empty( $assoc_args['show-sites'] ) ) {
+			$site_status_list = $this->get_site_status_list();
+			$relation = $this->create_plugin_site_relation( $site_status_list, $items );
+		}
+
 		foreach ( $items as $file => $details ) {
+
+			$line = '  ';
 			if ( $details['update'] ) {
 				$line = ' %yU%n';
-			} else {
-				$line = '  ';
 			}
 
 			$line .= $this->format_status( $details['status'], 'short' );
@@ -89,11 +96,142 @@ abstract class CommandWithUpgrade extends \WP_CLI_Command {
 			}
 
 			\WP_CLI::line( \WP_CLI::colorize( $line ) );
+			$line = '';
+			if ( !empty( $relation[ $file ] ) ) {
+				foreach ( $relation[ $file ] as $site_name => $status ) {
+					$line = "\t -- " . $status . ' ' . $site_name . '%n';
+					\WP_CLI::line( \WP_CLI::colorize( $line ) );
+				}
+			}
 		}
 
 		\WP_CLI::line();
 
 		$this->show_legend( $items );
+
+	}
+
+	private function get_site_status_list() {
+		global $wpdb;
+		return $wpdb->get_results( "SELECT blog_id, path, public, archived, mature, spam, deleted FROM $wpdb->blogs", OBJECT_K );
+	}
+
+	private function create_plugin_site_relation( $site_status_list, $items ) {
+		global $wpdb;
+
+		$plugin_site_relation = [];
+
+		foreach ( $site_status_list as $site_id => $status ) {
+			$plugin_list = array();
+
+			if ( 1 === $site_id ) {
+				$sql = $wpdb->prepare(
+					"SELECT option_value FROM {$wpdb->prefix}options WHERE option_name = 'active_plugins' LIMIT 1", $wpdb->prefix );
+			} else {
+				$sql = $wpdb->prepare(
+					"SELECT option_value FROM {$wpdb->prefix}%d_options WHERE option_name = 'active_plugins' LIMIT 1", $site_id );
+			}
+
+			$row = $wpdb->get_row( $sql );
+
+			if ( isset( $row->option_value ) ) {
+
+				$site_name = $this->get_site_name( $site_id );
+
+				$status = $this->get_short_status( $status );
+				$plugin_list = maybe_unserialize( $row->option_value );
+				foreach ( $plugin_list as $plugin ) {
+					// ignore network wide
+					if ( 'active-network' === $items[$plugin]['status'] ) {
+						continue;
+					}
+					$plugin_site_relation[ $plugin ][ $site_id.'.'.$site_name ] = $status;
+				}
+			}
+
+		}
+		return $plugin_site_relation;
+	}
+	private function get_short_status( $status ) {
+
+		$short_status = '';
+
+		$colours = $this->get_site_colors();
+
+		$padding = 5;
+		if ( ! empty( $status->public ) ) {
+			$short_status .= sprintf( '%sP', $colours['public'] );
+			$padding--;
+		}
+		if ( ! empty( $status->mature ) ) {
+			$short_status .= sprintf( '%sM', $colours['mature'] );
+			$padding--;
+		}
+		if ( ! empty( $status->spam ) ) {
+			$short_status .= sprintf( '%sS', $colours['spam'] );
+			$padding--;
+		}
+		if ( ! empty( $status->archived ) ) {
+			$short_status .= sprintf( '%sA', $colours['archived'] );
+			$padding--;
+		}
+		if ( ! empty( $status->deleted ) ) {
+			$short_status .= sprintf( '%sD', $colours['deleted'] );
+			$padding--;
+		}
+
+		return $short_status . str_repeat(' ', $padding);
+	}
+
+	private function get_site_colors() {
+		static $colors = array(
+			'public'   => '',   // none
+			'archived' => '%y', // yellow
+			'mature'   => '%b', // blue
+			'spam'     => '%m', // magenta
+			'deleted'  => '%r', // red
+		);
+
+		return $colors;
+	}
+
+	private function get_site_name( $site_id ) {
+		global $wpdb;
+
+		if ( 1 === $site_id ) {
+			$site_name = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->prefix}options WHERE option_name=%s  LIMIT 1", 'blogname' ) );
+			return $site_name;
+		}
+
+		$site_name = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->prefix}%d_options WHERE option_name=%s  LIMIT 1", $site_id, 'blogname' ) );
+		return $site_name;
+	}
+
+
+	protected function active_many( $args, $assoc_args ) {
+
+		$items = $this->get_item_list();
+		if ( !empty( $items_to_update ) ) {
+			$cache_manager = \WP_CLI::get_http_cache_manager();
+			foreach ($items_to_update as $item) {
+				$cache_manager->whitelist_package($item['update_package'], $this->item_type, $item['name'], $item['update_version']);
+			}
+			$upgrader = $this->get_upgrader( $assoc_args );
+			// Ensure the upgrader uses the download offer present in each item
+			$transient_filter = function( $transient ) use ( $items_to_update ) {
+				foreach( $items_to_update as $name => $item_data ) {
+					if ( isset( $transient->response[ $name ] ) ) {
+						$transient->response[ $name ]->new_version = $item_data['update_version'];
+						$transient->response[ $name ]->package = $item_data['update_package'];
+					}
+				}
+				return $transient;
+			};
+			add_filter( 'site_transient_' . $this->upgrade_transient, $transient_filter, 999 );
+			$result = $upgrader->bulk_upgrade( wp_list_pluck( $items_to_update, 'update_id' ) );
+			remove_filter( 'site_transient_' . $this->upgrade_transient, $transient_filter, 999 );
+		}
+
 	}
 
 	private function get_padding( $items ) {
