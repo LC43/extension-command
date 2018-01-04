@@ -82,7 +82,7 @@ class Theme_Command extends \WP_CLI\CommandWithUpgrade {
 	 *     		Version: 1.2
 	 *     		Author: the WordPress team
 	 */
-	public function status( $args ) {
+	public function status( $args, $assoc_args ) {
 		if ( isset( $args[0] ) ) {
 			$theme = $this->fetcher->get_check( $args[0] );
 			$errors = $theme->errors();

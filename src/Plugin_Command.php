@@ -72,6 +72,9 @@ class Plugin_Command extends \WP_CLI\CommandWithUpgrade {
 	 * [<plugin>]
 	 * : A particular plugin to show the status for.
 	 *
+	 * [--show-sites]
+	 * : Show the sites where the plugins are active.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     # Displays status of all plugins
@@ -93,8 +96,8 @@ class Plugin_Command extends \WP_CLI\CommandWithUpgrade {
 	 *         Author: Otto42, pross
 	 *         Description: A simple and easy way to test your theme for all the latest WordPress standards and practices. A great theme development tool!
 	 */
-	public function status( $args ) {
-		parent::status( $args );
+	public function status( $args, $assoc_args ) {
+		parent::status( $args, $assoc_args );
 	}
 
 	/**

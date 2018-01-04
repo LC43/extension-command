@@ -44,7 +44,14 @@ abstract class CommandWithUpgrade extends \WP_CLI_Command {
 
 	abstract protected function install_from_repo( $slug, $assoc_args );
 
-	public function status( $args ) {
+	/**
+	 * List plugin status
+	 *
+	 * @param  array $args       A arguments array containing the item name.
+	 * @param  array $assoc_args Data passed in from command.
+	 */
+	public function status( $args, $assoc_args ) {
+
 		// Force WordPress to check for updates
 		call_user_func( $this->upgrade_refresh );
 
